@@ -1,58 +1,79 @@
 import tkinter as tk
-from backend import update_fungal_density_for_one_cell
+from backend import update_fungal_density_for_one_cell, starting_point_available
 import copy
 from matplotlib.pylab import randint
+import sim_utils as su
+
+from tkinter import PhotoImage
 
 class GridApp:
-    def __init__(self, root, rows=10, cols=10, cell_size=40):
+    def __init__(self, root, rows=40, cols=40, cell_size=15):
         self.root = root
         self.rows = rows
         self.cols = cols
         self.cell_size = cell_size
         self.cells = {}
-        grid_size = 10
-        # self.grid_matrix = [[[15, 50, 50, 0] for _ in range(cols)] for _ in range(rows)]
-        self.grid_matrix = [[[randint(0,30), randint(0, 100), randint(0,100), 0] for _ in range(grid_size)] for _ in range(grid_size)]
+        self.grid_matrix = [[[15, 50, 50, 0] for _ in range(cols)] for _ in range(rows)]
         self.temperature_mode = False
         self.food_mode = False
         self.humidity_mode = False
         self.current_s_cell = None
-
         self.start_coordinates = tuple()
 
-        self.time_step_hours = 0.1  # Domyślny krok czasowy w godzinach
-        self.diffusion_coefficient = 0.5  # Domyślny współczynnik dyfuzji
+        self.time_step_hours = 1
+        self.diffusion_coefficient = 0.5
 
-        self.canvas_label = tk.Label(root, text="Kliknij komórkę by ustawić ją jako startową", font="arial 15 bold")
-        self.canvas = tk.Canvas(root, width=cols * cell_size, height=rows * cell_size)
+        self.main_frame = tk.Frame(root)
+        self.main_frame.pack(fill="both", expand=True)
+        self.grid_frame = tk.Frame(self.main_frame)
+        self.grid_frame.pack()
+
+        self.canvas_label = tk.Label(self.grid_frame, text="Kliknij komórkę by ustawić ją jako startową", font="arial 15 bold")
         self.canvas_label.pack()
+
+        self.canvas = tk.Canvas(self.grid_frame, width=cols * cell_size, height=rows * cell_size)
         self.canvas.pack()
 
-        self.simulation_started = False
-        self.start_simulation_button = tk.Button(root, text="Rozpocznij symulację", font="arial 15 bold", command=self.start_simulation)
-        self.start_simulation_button.pack()
+        self.image_frame = tk.Frame(self.main_frame)
+        self.image_frame.pack(side="left", padx=10, pady=20)
 
-        # Suwaki i przyciski trybów
+        self.image = PhotoImage(file="image.png")
+        self.image_label = tk.Label(self.image_frame, image=self.image)
+        self.image_label.pack_forget()
+        
+        self.buttons_frame = tk.Frame(root)
+        self.buttons_frame.pack(pady=10)
+        self.start_simulation_button = tk.Button(self.buttons_frame, text="Rozpocznij symulację", font="arial 15 bold", command=self.start_simulation)
+        self.randomize_button = tk.Button(self.buttons_frame, text="Losuj wartości parametrów", font="arial 15", command=self.randomize_values)
+        self.reset_button = tk.Button(self.buttons_frame, text="Resetuj symulację", font="arial 15 bold", command=self.reset_simulation)
+        self.start_simulation_button.pack(side="left", padx=5)
+        self.randomize_button.pack(side="left", padx=5)
+        self.reset_button.pack(side="left", padx=5)
+
+        self.simulation_started = False
+
         self.temperature_slider = tk.Scale(root, from_=0, to=30, orient="horizontal", label="Temperatura (°C)")
         self.food_slider = tk.Scale(root, from_=0, to=100, orient="horizontal", label="Poziom pożywienia")
         self.humidity_slider = tk.Scale(root, from_=0, to=100, orient="horizontal", label="Wilgotność (%)")
         self.diffusion_slider = tk.Scale(root, from_=0, to=1, resolution=0.01, orient="horizontal", label="Współczynnik dyfuzji", length=125)
         self.diffusion_slider.set(self.diffusion_coefficient)
 
-        self.toggle_temp_button = tk.Button(root, text="Tryb Temperatury", font="arial 15", command=self.toggle_temperature_mode)
-        self.toggle_food_button = tk.Button(root, text="Tryb Pożywienia", font="arial 15", command=self.toggle_food_mode)
-        self.toggle_humidity_button = tk.Button(root, text="Tryb Wilgotności", font="arial 15", command=self.toggle_humidity_mode)
+        self.mode_buttons_frame = tk.Frame(root)
+        self.mode_buttons_frame.pack()
 
-        # Pole wejściowe kroku czasowego
+        self.toggle_temp_button = tk.Button(self.mode_buttons_frame, text="Tryb Temperatury", font="arial 15", command=self.toggle_temperature_mode)
+        self.toggle_food_button = tk.Button(self.mode_buttons_frame, text="Pożywienie", font="arial 15", command=self.toggle_food_mode)
+        self.toggle_humidity_button = tk.Button(self.mode_buttons_frame, text="Tryb Wilgotności", font="arial 15", command=self.toggle_humidity_mode)
+
+        self.toggle_temp_button.pack(side="left", padx=5)
+        self.toggle_food_button.pack(side="left", padx=5)
+        self.toggle_humidity_button.pack(side="left", padx=5)
+        
+
         self.time_step_label = tk.Label(root, text="Krok czasowy (godziny):", font="arial 12")
         self.time_step_entry = tk.Entry(root, font="arial 12", width=10)
-        self.time_step_entry.insert(0, str(self.time_step_hours))  # Ustaw domyślną wartość
+        self.time_step_entry.insert(0, str(self.time_step_hours))
         self.time_step_button = tk.Button(root, text="Ustaw krok", font="arial 12", command=self.set_time_step)
-
-        # Umieszczanie elementów GUI
-        self.toggle_temp_button.pack()
-        self.toggle_food_button.pack()
-        self.toggle_humidity_button.pack()
         self.diffusion_slider.pack()
         self.time_step_label.pack()
         self.time_step_entry.pack()
@@ -61,16 +82,71 @@ class GridApp:
         self.draw_grid()
         self.canvas.bind("<Button-1>", self.on_click)
 
+    def reset_simulation(self):
+        """Resets the simulation to its initial state."""
+        
+        self.grid_matrix = [[[15, 50, 50, 0] for _ in range(self.cols)] for _ in range(self.rows)]
+
+        self.temperature_slider.set(15)
+        self.food_slider.set(50)
+        self.humidity_slider.set(50)
+        self.diffusion_slider.set(self.diffusion_coefficient)
+
+        self.image_label.pack_forget()
+
+        self.canvas.delete("all")
+        self.cells = {}
+        self.draw_grid()
+
+        self.simulation_started = False
+        self.start_coordinates = tuple()
+        if self.current_s_cell:
+            self.canvas.delete(self.current_s_cell)
+            self.current_s_cell = None
+
+        self.temperature_slider.config(state="normal")
+        self.temperature_slider.pack_forget()
+        self.food_slider.config(state="normal")
+        self.food_slider.pack_forget()
+        self.humidity_slider.config(state="normal")
+        self.humidity_slider.pack_forget()
+        self.diffusion_slider.config(state="normal")
+        self.time_step_entry.config(state="normal")
+        self.time_step_button.config(state="normal")
+        self.toggle_temp_button.config(state="normal")
+        self.toggle_temp_button.config(text="Tryb Temperatury")
+        self.randomize_button.config(state="normal")
+        self.toggle_food_button.config(state="normal")
+        self.toggle_food_button.config(text="Pożywienie")
+        self.toggle_humidity_button.config(state="normal")
+        self.toggle_humidity_button.config(text="Tryb Wilgotności")
+        self.start_simulation_button.config(text="Rozpocznij symulację", command=self.start_simulation)
+        self.temperature_mode = self.food_mode = self.humidity_mode = False
+        self.canvas_label.config(text="Kliknij komórkę by ustawić ją jako startową", fg="black")
+        print("Symulacja została zresetowana!")
+
+    def randomize_values(self):
+        for i in range(self.rows):
+            for j in range(self.cols):
+                self.grid_matrix[i][j][0] = randint(0,30)
+                self.grid_matrix[i][j][1] = randint(0,100)
+                self.grid_matrix[i][j][2] = randint(0,100)
+        self.update_cell_colors()
+
     def start_simulation(self, rows=10, cols=10, cell_size=40):
         """Rozpoczyna symulację i blokuje możliwość zmiany parametrów."""
         if len(self.start_coordinates) == 0:
             self.canvas_label.config(text="Najpierw wybierz komórkę startową!", fg="red")
             return      
+        if not starting_point_available(self.grid_matrix, self.start_coordinates[0], self.start_coordinates[1]):
+            self.canvas_label.config(text="Wybrana komórka nie spełnia warunków startowych!", fg="red")
+            return
         if not self.simulation_started:
+            self.canvas_label.config(text="Symulacja rozpoczęta", fg="green")
+            self.image_label.pack()
             self.simulation_started = True
-            # self.start_simulation_button.config(state="disabled")  # Wyłącz guzik
+            self.grid_frame.pack(side="left", ipadx=10)
             self.start_simulation_button.config(text="Zatrzymaj symulację", command=self.stop_simulation)
-            # Zablokowanie suwaków
             self.temperature_slider.config(state="disabled")
             self.food_slider.config(state="disabled")
             self.humidity_slider.config(state="disabled")
@@ -78,23 +154,28 @@ class GridApp:
             self.time_step_entry.config(state="disabled")
             self.time_step_button.config(state="disabled")
             self.toggle_temp_button.config(state="disabled")
+            self.randomize_button.config(state="disabled")
             self.toggle_food_button.config(state="disabled")
             self.toggle_humidity_button.config(state="disabled")
-            self.grid_matrix[self.start_coordinates[0]][self.start_coordinates[1]][3] = 0.01
+            
+            if self.grid_matrix[self.start_coordinates[0]][self.start_coordinates[1]][3] == 0:
+                self.grid_matrix[self.start_coordinates[0]][self.start_coordinates[1]][3] = 0.01
             print("Symulacja rozpoczęta! Parametry zostały zablokowane.")
             self.simulate()
 
+    # region simulate
     def simulate(self):
         """Symuluje wzrost grzybni w siatce."""
         if self.simulation_started:
             new_grid = copy.deepcopy(self.grid_matrix)
-            for i in range(self.rows):
-                for j in range(self.cols):
-                    new_density = update_fungal_density_for_one_cell(self.grid_matrix, self.diffusion_coefficient, 0.84, self.time_step_hours, i, j, self.rows, self.cols)
-                    new_grid[i][j][3] = new_density
-                    if new_density >= 1:
-                        new_grid[i][j][3] = 0.99
-            self.grid_matrix = new_grid
+            for _ in range(int(self.time_step_hours/1)):
+                for i in range(self.rows):
+                    for j in range(self.cols):
+                        new_density = update_fungal_density_for_one_cell(self.grid_matrix, self.diffusion_coefficient, 0.84, 0.1, i, j, self.rows, self.cols)
+                        new_grid[i][j][3] = new_density
+                        if new_density >= 1:
+                            new_grid[i][j][3] = 1.0
+                self.grid_matrix = new_grid
             self.update_cell_color()
             self.root.after(1000, self.simulate)
 
@@ -102,25 +183,14 @@ class GridApp:
     def update_cell_color(self):
         for rect_id, (row, col) in self.cells.items():
             density = self.grid_matrix[row][col][3]
-            color = self.get_cell_color(density)
+            color = su.get_cell_color(density)
             self.canvas.itemconfig(rect_id, fill=color)
 
     def stop_simulation(self):
         """Zatrzymuje symulację i odblokowuje możliwość zmiany parametrów."""
         if self.simulation_started:
             self.simulation_started = False
-            self.start_simulation_button.config(text="Rozpocznij symulację", command=self.start_simulation)
-            # Odblokowanie suwaków
-            self.temperature_slider.config(state="normal")
-            self.food_slider.config(state="normal")
-            self.humidity_slider.config(state="normal")
-            self.diffusion_slider.config(state="normal")
-            self.time_step_entry.config(state="normal")
-            self.time_step_button.config(state="normal")
-            self.toggle_temp_button.config(state="normal")
-            self.toggle_food_button.config(state="normal")
-            self.toggle_humidity_button.config(state="normal")
-            print("Symulacja zatrzymana! Parametry zostały odblokowane.")
+            self.start_simulation_button.config(text="Wznów symulację", command=self.start_simulation)
 
     def set_time_step(self):
         """Ustawia krok czasowy na podstawie wartości w polu tekstowym."""
@@ -140,9 +210,10 @@ class GridApp:
         print(f"Współczynnik dyfuzji ustawiony na {self.diffusion_coefficient}.")
 
     def on_click(self, event):
+        if(self.simulation_started):
+            return
+        
         x, y = event.x, event.y
-
-        # Znajdź ID klikniętej kratki
         clicked_cell = self.canvas.find_closest(x, y)
         if clicked_cell:
             cell_id = clicked_cell[0]
@@ -150,28 +221,26 @@ class GridApp:
 
             if self.temperature_mode:
                 temperature = self.temperature_slider.get()
-                self.grid_matrix[row][col][0] = temperature  # Aktualizuj temperaturę w macierzy
-                new_color = self.get_temperature_color(temperature)
+                self.grid_matrix[row][col][0] = temperature 
+                new_color = su.get_temperature_color(temperature)
                 self.canvas.itemconfig(cell_id, fill=new_color)
 
             elif self.food_mode:
                 food_level = self.food_slider.get()
-                self.grid_matrix[row][col][1] = food_level  # Aktualizuj poziom pożywienia w macierzy
-                new_color = self.get_food_color(food_level)
+                self.grid_matrix[row][col][1] = food_level
+                new_color = su.get_food_color(food_level)
                 self.canvas.itemconfig(cell_id, fill=new_color)
 
             elif self.humidity_mode:
                 humidity = self.humidity_slider.get()
-                self.grid_matrix[row][col][2] = humidity  # Aktualizuj wilgotność w macierzy
-                new_color = self.get_humidity_color(humidity)
+                self.grid_matrix[row][col][2] = humidity 
+                new_color = su.get_humidity_color(humidity)
                 self.canvas.itemconfig(cell_id, fill=new_color)
 
             else:
-                # Usuń poprzednią literkę "S", jeśli istnieje
                 if self.current_s_cell:
                     self.canvas.delete(self.current_s_cell)
 
-                # Dodaj literkę "S" w środku klikniętej komórki
                 x1, y1 = col * self.cell_size, row * self.cell_size
                 x2, y2 = x1 + self.cell_size, y1 + self.cell_size
                 text_x = (x1 + x2) / 2
@@ -187,13 +256,12 @@ class GridApp:
                 x2 = x1 + self.cell_size
                 y2 = y1 + self.cell_size
 
-                # Narysuj prostokąt z domyślnym kolorem (białym)
                 rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, fill="white", outline="black")
-                self.cells[rect_id] = (row, col)  # Mapowanie ID na współrzędne w macierzy
+                self.cells[rect_id] = (row, col)
 
     def toggle_temperature_mode(self):
         self.temperature_mode = not self.temperature_mode
-        self.food_mode = self.humidity_mode = False  # Wyłącz inne tryby
+        self.food_mode = self.humidity_mode = False
         self.update_buttons()
         if self.temperature_mode:
             self.temperature_slider.pack()
@@ -206,7 +274,7 @@ class GridApp:
 
     def toggle_food_mode(self):
         self.food_mode = not self.food_mode
-        self.temperature_mode = self.humidity_mode = False  # Wyłącz inne tryby
+        self.temperature_mode = self.humidity_mode = False
         self.update_buttons()
         if self.food_mode:
             self.food_slider.pack()
@@ -219,7 +287,7 @@ class GridApp:
 
     def toggle_humidity_mode(self):
         self.humidity_mode = not self.humidity_mode
-        self.temperature_mode = self.food_mode = False  # Wyłącz inne tryby
+        self.temperature_mode = self.food_mode = False 
         self.update_buttons()
         if self.humidity_mode:
             self.humidity_slider.pack()
@@ -239,102 +307,30 @@ class GridApp:
         for rect_id, (row, col) in self.cells.items():
             if self.temperature_mode:
                 temperature = self.grid_matrix[row][col][0]
-                color = self.get_temperature_color(temperature)
+                color = su.get_temperature_color(temperature)
             elif self.food_mode:
                 food_level = self.grid_matrix[row][col][1]
-                color = self.get_food_color(food_level)
+                color = su.get_food_color(food_level)
             elif self.humidity_mode:
                 humidity = self.grid_matrix[row][col][2]
-                color = self.get_humidity_color(humidity)
+                color = su.get_humidity_color(humidity)
             else:
-                color = "white"  # Domyślny kolor
+                color = "white"  
             self.canvas.itemconfig(rect_id, fill=color)
-
-    def get_cell_color(self, density):
-        # gradient_colors = [
-        #     (255, 255, 0),   # Żółty
-        #     (0, 255, 128),   # Zielony
-        #     (0, 128, 255),   # Niebieski
-        #     (128, 0, 128)    # Fioletowy
-        # ]
-
-        gradient_colors = [
-            (128, 0, 128),    # Fioletowy
-            (0, 128, 255),   # Niebieski
-            (0, 255, 128),   # Zielony
-            (255, 255, 0)  # Żółty
-        ]
-
-        # Pozycje tych kolorów wzdłuż gradientu
-        gradient_positions = [0.0, 0.33, 0.66, 1.0]
-
-            # Znajdź, między którymi kolorami znajduje się density
-        for i in range(len(gradient_positions) - 1):
-            if gradient_positions[i] <= density <= gradient_positions[i + 1]:
-                # Interpolacja między dwoma sąsiednimi kolorami
-                start_color = gradient_colors[i]
-                end_color = gradient_colors[i + 1]
-                start_pos = gradient_positions[i]
-                end_pos = gradient_positions[i + 1]
-                # Normalizacja wartości density do zakresu 0-1
-                t = (density - start_pos) / (end_pos - start_pos)
-                # Interpolacja wartości RGB
-                red = int(start_color[0] + (end_color[0] - start_color[0]) * t)
-                green = int(start_color[1] + (end_color[1] - start_color[1]) * t)
-                blue = int(start_color[2] + (end_color[2] - start_color[2]) * t)
-                return f"#{red:02x}{green:02x}{blue:02x}"
-
-        # Wartość domyślna (nie powinna wystąpić)
-        return "#000000"
-
-
-    def get_temperature_color(self, temperature):
-        # Skala temperatury od 0 (niebieski) do 30 (czerwony) z przejściem przez zielony
-        if temperature <= 15:
-            # Przejście od niebieskiego do zielonego (0-15)
-            ratio = temperature / 15
-            red = int(ratio * 255)
-            green = 255
-            blue = int((1 - ratio) * 255)
-        else:
-            # Przejście od zielonego do czerwonego (15-30)
-            ratio = (temperature - 15) / 15
-            red = 255
-            green = int((1 - ratio) * 255)
-            blue = 0
-        return f"#{red:02x}{green:02x}{blue:02x}"
-
-    def get_food_color(self, food_level):
-        # Skala pożywienia od 0 (jasny beż) do 100 (ciemny czerwony)
-
-        # Kolory krańcowe gradientu
-        start_color = (255, 240, 225)  # Jasny beż
-        end_color = (128, 0, 0)        # Ciemny czerwony
-
-        # Interpolacja kolorów
-        red = int(start_color[0] + (end_color[0] - start_color[0]) * (food_level / 100))
-        green = int(start_color[1] + (end_color[1] - start_color[1]) * (food_level / 100))
-        blue = int(start_color[2] + (end_color[2] - start_color[2]) * (food_level / 100))
-
-        return f"#{red:02x}{green:02x}{blue:02x}"
-
-    def get_humidity_color(self, humidity):
-        # Skala wilgotności od 0 (jasny beż) do 100 (ciemny fiolet)
-
-        # Kolory krańcowe gradientu
-        start_color = (255, 228, 200)  # Jasny beż
-        end_color = (48, 25, 52)       # Ciemny fiolet
-
-        # Interpolacja kolorów
-        red = int(start_color[0] + (end_color[0] - start_color[0]) * (humidity / 100))
-        green = int(start_color[1] + (end_color[1] - start_color[1]) * (humidity / 100))
-        blue = int(start_color[2] + (end_color[2] - start_color[2]) * (humidity / 100))
-
-        return f"#{red:02x}{green:02x}{blue:02x}"
 
 
 if __name__ == "__main__":
+    def center_window(width=300, height=200):
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        x = (screen_width/2) - (width/2)
+        y = (screen_height/2) - (height/2)
+        root.geometry('%dx%d+%d+%d' % (width, height, x, y-45))
+    
     root = tk.Tk()
+    frame = tk.Frame(root)
+    center_window(800, 990)  
     root.title("Siatka 2D - Skala Temperatury, Pożywienia i Wilgotności")
     app = GridApp(root)
     root.mainloop()
